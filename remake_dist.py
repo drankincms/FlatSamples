@@ -10,14 +10,13 @@ import os,sys
 # Defines important variables
 
 particle_num = 50
-file_num_sig = 2
-file_num_bkg = 10
 fill_factor = 1.0
-pt_range = [200., 800.]
-mass_range = [40., 240.]
-signal_list = ['flat_qq']
-background_list = ['QCD_HT_1000to1500']
-output_name = "test.z"
+max_files_sig = 125
+max_files_bkg = 1000
+sigindex = 0
+bkgindex = 0
+pt_range = [200., 500.]
+mass_range = [20., 80.]
 
 # Opens json files for signal and background
 
@@ -62,7 +61,8 @@ def remake(iFiles_sig, iFiles_bkg, iFile_out):
     df_sig_to_concat = []
     for sig in iFiles_sig:
         file_list = os.listdir(payload['samples'][sig])
-        for i in range(file_num_sig):
+        for i in range(sigindex*max_files_sig,min(len(file_list),(sigindex+1)*max_files_sig)):
+            if i%10==0: print('%i/%i'%(i,len(file_list)))
             data_set = payload['samples'][sig]+file_list[i]
             arr_sig_to_concat_temp = []
             file1 = uproot.open(data_set)
@@ -87,7 +87,7 @@ def remake(iFiles_sig, iFiles_bkg, iFile_out):
             pt_col = df_sig_temp[weight[0]].values.reshape(-1, 1)
             mass_col = df_sig_temp[weight[1]].values.reshape(-1, 1)
             df_sig_temp = df_sig_temp[np.logical_and(np.logical_and(np.greater(pt_col, pt_range[0]), np.less(pt_col, pt_range[1])), np.logical_and(np.greater(mass_col, mass_range[0]), np.less(mass_col, mass_range[1])))]
-            df_sig_to_concat.append(df_sig_temp)
+            df_sig_to_concat.append(df_sig_temp[columns].astype('float32'))
     df_sig = pd.concat(df_sig_to_concat)
 
     # Calculates the distribution of the signal
@@ -97,13 +97,27 @@ def remake(iFiles_sig, iFiles_bkg, iFile_out):
     print(sig_hist)
     print(np.sum(sig_hist))
 
+    # Creates output file
+    #df_sig = df_sig[columns].astype('float32')
+    #df_sig = df_sig[~(np.sum(np.isinf(df_sig.values), axis=1) > 0)] 
+    print(list(df_sig.columns))
+
+    # Open HDF5 file and write dataset
+
+    h5_file = h5py.File(iFile_out+"_sig.z", 'w')
+    h5_file.create_dataset('taggerInputs', data=df_sig.values, compression='lzf')
+    h5_file.close()
+    del h5_file
+    del df_sig
+
     # Creates the background data frame
 
     df_remade_bkg = pd.DataFrame(columns=columns)
     for bkg in iFiles_bkg:
         df_bkg_to_concat = []
         file_list = os.listdir(payload['samples'][bkg])
-        for i in range(file_num_bkg):
+        for i in range(bkgindex*max_files_bkg,min(len(file_list),(bkgindex+1)*max_files_bkg)):
+            if i%10==0: print('%i/%i'%(i,len(file_list)))
             data_set = payload['samples'][bkg]+file_list[i]
             arr_bkg_to_concat_temp = []
             file1 = uproot.open(data_set)
@@ -125,7 +139,7 @@ def remake(iFiles_sig, iFiles_bkg, iFile_out):
                 df_bkg_temp[column] = branches[column].reshape(-1, 1)
             df_bkg_temp['label'] = 0
             df_bkg_temp = df_bkg_temp[columns]
-            df_bkg_to_concat.append(df_bkg_temp)
+            df_bkg_to_concat.append(df_bkg_temp[columns].astype('float32'))
         df_bkg = pd.concat(df_bkg_to_concat)
 
         # Adds background based on signal distribution until fill factor is reached
@@ -141,28 +155,31 @@ def remake(iFiles_sig, iFiles_bkg, iFile_out):
     # Shows fill factor per bin
 
     bkg_hist, _, _ = np.histogram2d(df_remade_bkg[weight[0]], df_remade_bkg[weight[1]], bins=20,
-                                    range=np.array([[200., 800.], [40., 240.]]))
+                                    range=np.array([pt_range, mass_range]))
     print(np.nan_to_num(np.divide(bkg_hist, sig_hist)))
-
-    # Merges data frames
-
-    merged_df = pd.concat([df_sig, df_remade_bkg]).astype('float32')
 
     # Creates output file
 
-    merged_df = merged_df[columns]
-    final_df = merged_df[~(np.sum(np.isinf(merged_df.values), axis=1) > 0)]
-    print(list(final_df.columns))
-    arr = final_df.values
-    print(arr.shape)
-
+    #df_remade_bkg = df_remade_bkg[columns].astype('float32')
+    #df_remade_bkg = df_remade_bkg[~(np.sum(np.isinf(df_remade_bkg.values), axis=1) > 0)]
+    print(list(df_remade_bkg.columns))
     # Open HDF5 file and write dataset
 
-    h5_file = h5py.File(iFile_out, 'w')
-    h5_file.create_dataset('deepDoubleTau', data=arr, compression='lzf')
+    h5_file = h5py.File(iFile_out+"_bkg.z", 'w')
+    h5_file.create_dataset('taggerInputs', data=df_remade_bkg.values, compression='lzf')
     h5_file.close()
     del h5_file
+    del df_bkg
+    del df_remade_bkg
 
 
 # Remakes data sets
+signal_list = ['ZPrimeToQQ_M50_nom']
+background_list = ['QCD_HT500to700_nom','QCD_HT700to1000_nom']
+output_name = "test%i_nom"%sigindex
+remake(signal_list, background_list, output_name)
+
+signal_list = ['ZPrimeToQQ_M50_down']
+background_list = ['QCD_HT500to700_down','QCD_HT700to1000_down']
+output_name = "test%i_down"%sigindex
 remake(signal_list, background_list, output_name)
